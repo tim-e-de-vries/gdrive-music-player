@@ -1,0 +1,8 @@
+{
+  "projects": {
+    "default": "gdrive-music-player-da3ea",
+    "staging": "gdrive-music-player-da3ea"
+  },
+  "targets": {},
+  "etags": {}
+}

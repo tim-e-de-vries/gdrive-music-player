@@ -1,4 +1,4 @@
-name: Build and Deploy to Cloud Run
+name: Build and Deploy (Cloud Run & Firebase Hosting)
 
 on:
   push:
@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - 'server/**'
+      - 'client/**'
+      - 'firebase.json'
+      - '.firebaserc'
       - '.github/workflows/deploy.yml'
 
 env:
@@ -15,28 +18,43 @@ env:
   SERVICE: ${{ secrets.GCP_SERVICE_NAME || 'music-player-backend' }}
 
 jobs:
-  deploy:
-    name: Build & Deploy
+  deploy-backend:
+    name: Build & Deploy Backend
     runs-on: ubuntu-latest
-
+    # Optional: Only run if server files actually changed (useful if both are in same repo)
+    outputs:
+      server_changed: ${{ steps.filter.outputs.server }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Filter Server Changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            server:
+              - 'server/**'
+              - '.github/workflows/deploy.yml'
+
       - name: Authenticate to Google Cloud
+        if: steps.filter.outputs.server == 'true'
         id: auth
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Set up Cloud SDK
+        if: steps.filter.outputs.server == 'true'
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Configure Docker
+        if: steps.filter.outputs.server == 'true'
         run: |
           gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
       - name: Build, Tag, and Push Docker Image
+        if: steps.filter.outputs.server == 'true'
         run: |
           IMAGE_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}"
           docker build -t $IMAGE_TAG ./server
@@ -44,6 +62,7 @@ jobs:
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
 
       - name: Deploy to Cloud Run
+        if: steps.filter.outputs.server == 'true'
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.SERVICE }}
@@ -52,3 +71,52 @@ jobs:
           flags: |
             --min-instances=0
             --allow-unauthenticated
+
+  deploy-frontend:
+    name: Build & Deploy Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Filter Client Changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            client:
+              - 'client/**'
+              - 'firebase.json'
+              - '.firebaserc'
+              - '.github/workflows/deploy.yml'
+
+      - name: Set up Node.js
+        if: steps.filter.outputs.client == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: './client/package-lock.json'
+
+      - name: Install Client Dependencies
+        if: steps.filter.outputs.client == 'true'
+        run: |
+          npm ci
+        working-directory: ./client
+
+      - name: Build React App
+        if: steps.filter.outputs.client == 'true'
+        run: |
+          npm run build
+        working-directory: ./client
+        env:
+          VITE_OAUTH_CLIENT_ID: ${{ secrets.VITE_OAUTH_CLIENT_ID }}
+
+      - name: Deploy to Firebase Hosting
+        if: steps.filter.outputs.client == 'true'
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_GDRIVE_MUSIC_PLAYER_DA3EA }}
+          projectId: ${{ env.PROJECT_ID }}
+          channelId: live
