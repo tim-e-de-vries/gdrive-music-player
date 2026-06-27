@@ -111,11 +111,8 @@ export async function shuffleLibrary(): Promise<Track[]> {
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
 
-  // Take the first 50 keys
-  const selected = shuffled.slice(0, 50);
-
-  // Translate to full Track objects with parsed metadata fallback
-  return selected.map((t) => parsePathToTrack(t.path, t.id));
+  // Translate the full shuffled list to Track objects with parsed metadata fallback
+  return shuffled.map((t) => parsePathToTrack(t.path, t.id));
 }
 
 /**

@@ -297,7 +297,7 @@ body {
 .library-section {
   flex-grow: 1;
   background-color: #121212;
-  overflow-y: auto;
+  overflow: hidden; /* Fix 1: Make main panel stationary */
   padding: 24px;
   display: flex;
   flex-direction: column;
@@ -310,6 +310,7 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 20px;
+  flex-shrink: 0; /* Prevent title from shrinking */
 }
 
 .library-section h3 {
@@ -327,6 +328,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow-y: auto; /* Fix 1: Enable scroll strictly on tracks */
+  flex-grow: 1;
 }
 
 .track-item {
