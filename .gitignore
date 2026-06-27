@@ -1,4 +1,21 @@
-*.json
-node_modules
+# Dependency and Build directories
+node_modules/
+dist/
+.firebase/
+.agents/
+
+# Local Environment files
 .env
-.agents
+.env.local
+.env.*.local
+*.env*
+
+# Google Cloud & Firebase private secrets keys (DO NOT COMMIT SECRETS)
+client_secret_*.json
+*-adminsdk-*.json
+gdrive-music-player-*.json
+gsa-key.json
+gcp-sa-key.json
+*.key.json
+credentials.json
+*.private.json

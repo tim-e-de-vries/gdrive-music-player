@@ -61,7 +61,7 @@ jobs:
           docker push $IMAGE_TAG
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
 
-      - name: Deploy to Cloud Run
+      - name: Deploy to Cloud Run Service
         if: steps.filter.outputs.server == 'true'
         uses: google-github-actions/deploy-cloudrun@v2
         with:
@@ -71,6 +71,18 @@ jobs:
           flags: |
             --min-instances=0
             --allow-unauthenticated
+
+      - name: Deploy to Cloud Run Indexer Job
+        if: steps.filter.outputs.server == 'true'
+        run: |
+          IMAGE_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE }}:${{ github.sha }}"
+          gcloud run jobs update music-indexer \
+            --image=$IMAGE_TAG \
+            --command="node" \
+            --args="dist/indexer.js" \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} \
+            --quiet
 
   deploy-frontend:
     name: Build & Deploy Frontend
@@ -111,6 +123,7 @@ jobs:
         working-directory: ./client
         env:
           VITE_OAUTH_CLIENT_ID: ${{ secrets.VITE_OAUTH_CLIENT_ID }}
+          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://music-player-backend-140585753373.us-central1.run.app' }}
 
       - name: Deploy to Firebase Hosting
         if: steps.filter.outputs.client == 'true'

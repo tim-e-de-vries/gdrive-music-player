@@ -1,0 +1,17 @@
+{
+  "short_name": "Cloud Player",
+  "name": "Cloud Music Player",
+  "description": "Stream your personal music collection directly from Google Drive with gapless playback.",
+  "start_url": "/",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "display": "standalone",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    }
+  ]
+}
