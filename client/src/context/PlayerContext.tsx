@@ -10,10 +10,12 @@ interface PlayerContextType {
   currentIndex: number;
   isRateLimited: boolean;
   backoffSeconds: number;
+  isShuffleEnabled: boolean;
   playTrack: (track: Track, newQueue?: Track[]) => void;
   togglePlay: () => void;
   playNext: () => void;
   playPrev: () => void;
+  toggleShuffle: () => void;
   seekTo: (percentage: number) => void;
   addToQueue: (track: Track) => void;
 }
@@ -26,6 +28,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackProgress, setPlaybackProgress] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
+  const [isShuffleEnabled, setIsShuffleEnabled] = useState<boolean>(false);
+
+  const fullLibraryRef = useRef<Track[]>([]);
 
   // 429 Rate Limit exponential backoff state
   const [isRateLimited, setIsRateLimited] = useState<boolean>(false);
@@ -37,7 +42,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const audioRefB = useRef<HTMLAudioElement | null>(null);
   const activePlayerRef = useRef<'A' | 'B'>('A');
 
-  const currentTrack = currentIndex >= 0 && currentIndex < queue.length ? queue[currentIndex] : null;
+  const currentTrack = currentIndex >= 0 && currentIndex < fullLibraryRef.current.length ? fullLibraryRef.current[currentIndex] : null;
 
   // Initialize Audio Elements
   useEffect(() => {
@@ -152,16 +157,15 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const playTrack = (track: Track, newQueue?: Track[]) => {
-    const currentQueue = newQueue || queue;
+    const currentQueue = newQueue || fullLibraryRef.current;
     if (newQueue) {
-      setQueue(newQueue);
+      fullLibraryRef.current = newQueue;
     }
 
     const index = currentQueue.findIndex((t) => t.id === track.id);
     if (index === -1) {
-      // If not in queue, append and play
       const updatedQueue = [...currentQueue, track];
-      setQueue(updatedQueue);
+      fullLibraryRef.current = updatedQueue;
       setCurrentIndex(updatedQueue.length - 1);
     } else {
       setCurrentIndex(index);
@@ -169,6 +173,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     setIsPlaying(true);
     setPlaybackProgress(0);
+
+    // Keep the reactive queue state small and high-performance
+    const start = Math.max(0, index);
+    setQueue(currentQueue.slice(start, start + 50));
 
     // Load active source
     const activeAudio = activePlayerRef.current === 'A' ? audioRefA.current : audioRefB.current;
@@ -212,9 +220,21 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
+  const toggleShuffle = () => {
+    setIsShuffleEnabled((prev) => !prev);
+  };
+
   const playNext = () => {
-    if (currentIndex < queue.length - 1) {
-      // Gapless transition logic:
+    const currentQueue = fullLibraryRef.current.length > 0 ? fullLibraryRef.current : queue;
+    if (currentQueue.length === 0) return;
+
+    let nextIndex = currentIndex + 1;
+    if (isShuffleEnabled) {
+      // Pick a completely random index from the entire library
+      nextIndex = Math.floor(Math.random() * currentQueue.length);
+    }
+
+    if (nextIndex >= 0 && nextIndex < currentQueue.length) {
       // Swap active audio element A/B
       const prevAudio = activePlayerRef.current === 'A' ? audioRefA.current : audioRefB.current;
       const nextAudio = activePlayerRef.current === 'A' ? audioRefB.current : audioRefA.current;
@@ -225,9 +245,10 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
 
       activePlayerRef.current = activePlayerRef.current === 'A' ? 'B' : 'A';
-      setCurrentIndex((prev) => prev + 1);
+      setCurrentIndex(nextIndex);
       setIsPlaying(true);
 
+      const nextTrack = currentQueue[nextIndex];
       if (nextAudio && nextAudio.src) {
         nextAudio.play()
           .then(() => {
@@ -236,12 +257,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           })
           .catch((err) => {
             console.error('Gapless play failed, fallback standard loading:', err);
-            // Fallback load if pre-buffer failed or wasn't loaded
-            const nextTrack = queue[currentIndex + 1];
             playTrack(nextTrack);
           });
       } else {
-        const nextTrack = queue[currentIndex + 1];
         playTrack(nextTrack);
       }
     } else {
@@ -251,17 +269,33 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const playPrev = () => {
-    if (currentIndex > 0) {
+    const currentQueue = fullLibraryRef.current.length > 0 ? fullLibraryRef.current : queue;
+    if (currentQueue.length === 0) return;
+
+    let prevIndex = currentIndex - 1;
+    if (isShuffleEnabled) {
+      prevIndex = Math.floor(Math.random() * currentQueue.length);
+    }
+
+    if (prevIndex >= 0 && prevIndex < currentQueue.length) {
       const activeAudio = activePlayerRef.current === 'A' ? audioRefA.current : audioRefB.current;
       if (activeAudio) {
         activeAudio.pause();
         activeAudio.currentTime = 0;
       }
-      setCurrentIndex((prev) => prev - 1);
-      const prevTrack = queue[currentIndex - 1];
+      setCurrentIndex(prevIndex);
+      const prevTrack = currentQueue[prevIndex];
       playTrack(prevTrack);
     }
   };
+
+  // Sync lightweight sliding queue window when index changes
+  useEffect(() => {
+    const lib = fullLibraryRef.current;
+    if (lib.length === 0) return;
+    const start = Math.max(0, currentIndex);
+    setQueue(lib.slice(start, start + 50));
+  }, [currentIndex]);
 
   const seekTo = (percentage: number) => {
     const activeAudio = activePlayerRef.current === 'A' ? audioRefA.current : audioRefB.current;
@@ -309,10 +343,12 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         currentIndex,
         isRateLimited,
         backoffSeconds,
+        isShuffleEnabled,
         playTrack,
         togglePlay,
         playNext,
         playPrev,
+        toggleShuffle,
         seekTo,
         addToQueue,
       }}

@@ -97,10 +97,12 @@ function AppContent() {
     currentIndex,
     isRateLimited,
     backoffSeconds,
+    isShuffleEnabled,
     playTrack,
     togglePlay,
     playNext,
     playPrev,
+    toggleShuffle,
     seekTo,
   } = usePlayer();
 
@@ -108,6 +110,7 @@ function AppContent() {
   const [showToken, setShowToken] = useState(false);
   const [library, setLibrary] = useState<Track[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(150);
 
   // Sync client router path
   useEffect(() => {
@@ -130,9 +133,11 @@ function AppContent() {
       const tracks = await syncLibrary();
       if (tracks.length > 0) {
         setLibrary(tracks);
+        setVisibleCount(150);
       } else {
         // Fallback to MOCK_TRACKS if Cloud Storage is empty or hasn't crawled yet
         setLibrary(MOCK_TRACKS);
+        setVisibleCount(150);
       }
       setIsSyncing(false);
     };
@@ -233,13 +238,14 @@ function AppContent() {
               <div className="section-title-row">
                 <h3>Music Library</h3>
                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <button
+                   <button
                     className="sm-btn"
                     onClick={async () => {
                       setIsSyncing(true);
                       const tracks = await syncLibrary(true); // Force fetch new last-modified from GCS
                       if (tracks.length > 0) {
                         setLibrary(tracks);
+                        setVisibleCount(150);
                       }
                       setIsSyncing(false);
                     }}
@@ -252,6 +258,7 @@ function AppContent() {
                     onClick={async () => {
                       const selection = await shuffleLibrary();
                       if (selection.length > 0) {
+                        if (!isShuffleEnabled) toggleShuffle();
                         playTrack(selection[0], selection);
                       }
                     }}
@@ -288,7 +295,7 @@ function AppContent() {
                 </div>
               </div>
               <div className="track-list">
-                {library.map((track) => {
+                {library.slice(0, visibleCount).map((track) => {
                   const isCurrent = currentTrack?.id === track.id;
                   return (
                     <div
@@ -313,6 +320,14 @@ function AppContent() {
                     </div>
                   );
                 })}
+                {library.length > visibleCount && (
+                  <button
+                    className="load-more-btn animate-fade"
+                    onClick={() => setVisibleCount((prev) => prev + 150)}
+                  >
+                    Load More Songs ({library.length - visibleCount} remaining)
+                  </button>
+                )}
               </div>
             </section>
 
@@ -390,7 +405,7 @@ function AppContent() {
 
               {/* Center controls */}
               <div className="footer-controls">
-                <button className="control-btn" onClick={playPrev} disabled={!currentTrack || currentIndex <= 0}>
+                <button className="control-btn" onClick={playPrev} disabled={!currentTrack}>
                   <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
                     <polygon points="19 20 9 12 19 4 19 20" />
                     <line x1="5" y1="4" x2="5" y2="20" stroke="currentColor" strokeWidth="2" />
@@ -408,10 +423,23 @@ function AppContent() {
                     </svg>
                   )}
                 </button>
-                <button className="control-btn" onClick={playNext} disabled={!currentTrack || currentIndex >= queue.length - 1}>
+                <button className="control-btn" onClick={playNext} disabled={!currentTrack}>
                   <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
                     <polygon points="5 4 15 12 5 20 5 4" />
                     <line x1="19" y1="4" x2="19" y2="20" stroke="currentColor" strokeWidth="2" />
+                  </svg>
+                </button>
+                <button
+                  className={`control-btn ${isShuffleEnabled ? 'shuffle-active' : ''}`}
+                  onClick={toggleShuffle}
+                  title="Toggle Shuffle"
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="16 3 21 3 21 8" />
+                    <line x1="4" y1="20" x2="21" y2="3" />
+                    <polyline points="21 16 21 21 16 21" />
+                    <line x1="15" y1="15" x2="21" y2="21" />
+                    <line x1="4" y1="4" x2="9" y2="9" />
                   </svg>
                 </button>
               </div>
