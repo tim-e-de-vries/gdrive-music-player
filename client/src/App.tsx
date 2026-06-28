@@ -176,7 +176,7 @@ function AppContent() {
               <path d="M10 8l6 4-6 4V8z" fill="currentColor" />
             </svg>
             <h1>Cloud Music Player</h1>
-            <p className="subtitle">Stream your personal FLAC & MP3 collection directly from Google Drive with gapless playback.</p>
+            <p className="subtitle">Stream your personal FLAC & MP3 collection directly from Google Drive with perfect gapless playback.</p>
           </div>
 
           <button className="google-signin-btn" onClick={login}>
