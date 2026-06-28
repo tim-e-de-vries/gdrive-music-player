@@ -1,17 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { AuthContext } from './AuthContextCore';
 import { getAuthValue, setAuthValue, deleteAuthValue } from '../utils/db';
-
-interface AuthContextType {
-  accessToken: string | null;
-  session: string | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  login: () => void;
-  logout: () => Promise<void>;
-  refreshAccessToken: () => Promise<string | null>;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
 
@@ -20,9 +9,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // Redirect to Google OAuth Consent Screen
   const login = () => {
+    setAuthError(null);
     window.location.href = `${BACKEND_URL}/api/auth/google`;
   };
 
@@ -31,10 +22,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAccessToken(null);
     setSession(null);
     setExpiresAt(null);
+    setAuthError(null);
     await deleteAuthValue('access_token');
     await deleteAuthValue('session');
     await deleteAuthValue('expires_at');
   }, []);
+
+  const requireLogin = useCallback(async (message = 'Your Google session expired. Sign in again to continue streaming.') => {
+    await logout();
+    setAuthError(message);
+  }, [logout]);
 
   // Perform a silent refresh of the Google OAuth Access Token
   const refreshAccessToken = useCallback(async (): Promise<string | null> => {
@@ -53,8 +50,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         body: JSON.stringify({ session: currentSession }),
       });
 
+      if (response.status === 401 || response.status === 403) {
+        await requireLogin('Your Google session expired. Sign in again to continue.');
+        return null;
+      }
+
       if (!response.ok) {
-        throw new Error('Failed to refresh token from server');
+        setAuthError('Could not refresh your Google session. Check your connection and try again.');
+        throw new Error(`Failed to refresh token from server. Status: ${response.status}`);
       }
 
       const data = await response.json();
@@ -64,6 +67,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setAccessToken(newAccessToken);
       setExpiresAt(newExpiresAt);
+      setAuthError(null);
 
       await setAuthValue('access_token', newAccessToken);
       await setAuthValue('expires_at', newExpiresAt);
@@ -75,7 +79,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // only on explicit authorization failures (e.g. 401/403)
       return null;
     }
-  }, [session, logout]);
+  }, [session, logout, requireLogin]);
+
+  useEffect(() => {
+    const handleSWMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'AUTH_REQUIRED') {
+        requireLogin('Google Drive access was denied. Sign in again to reconnect your library.');
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleSWMessage);
+    }
+
+    return () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleSWMessage);
+      }
+    };
+  }, [requireLogin]);
 
   // Load existing credentials from IndexedDB on startup
   useEffect(() => {
@@ -130,20 +152,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         session,
         isAuthenticated,
         isLoading,
+        authError,
         login,
         logout,
         refreshAccessToken,
+        clearAuthError: () => setAuthError(null),
       }}
     >
       {children}
     </AuthContext.Provider>
   );
-};
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
 };

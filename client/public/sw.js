@@ -1,4 +1,10 @@
-const CACHE_NAME = 'cloud-player-v1';
+function notifyClients(message) {
+  self.clients.matchAll().then((clients) => {
+    for (const client of clients) {
+      client.postMessage(message);
+    }
+  });
+}
 
 // Helper to retrieve the current Google Access Token statelessly from IndexedDB
 function getAccessToken() {
@@ -17,7 +23,7 @@ function getAccessToken() {
         const getReq = store.get('access_token');
         getReq.onerror = () => resolve(null);
         getReq.onsuccess = () => resolve(getReq.result || null);
-      } catch (err) {
+      } catch {
         resolve(null);
       }
     };
@@ -27,7 +33,7 @@ function getAccessToken() {
   });
 }
 
-self.addEventListener('install', (event) => {
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
@@ -52,6 +58,7 @@ async function handleDriveStream(request, fileId) {
   try {
     const token = await getAccessToken();
     if (!token) {
+      notifyClients({ type: 'AUTH_REQUIRED', reason: 'missing_token' });
       return new Response('Unauthorized: No Google access token found in IndexedDB.', {
         status: 401,
         headers: { 'Content-Type': 'text/plain' }
@@ -77,14 +84,14 @@ async function handleDriveStream(request, fileId) {
       console.error(`Google Drive API returned error status ${response.status} for file ID ${fileId}`);
       if (response.status === 429) {
         // Broadcast rate limit hit to all frontend clients
-        self.clients.matchAll().then((clients) => {
-          for (const client of clients) {
-            client.postMessage({ type: 'RATE_LIMIT_HIT' });
-          }
-        });
+        notifyClients({ type: 'RATE_LIMIT_HIT' });
         return new Response('Rate Limit Exceeded', { status: 429 });
       }
       if (response.status === 401 || response.status === 403) {
+        notifyClients({
+          type: 'AUTH_REQUIRED',
+          reason: response.status === 401 ? 'drive_unauthorized' : 'drive_forbidden'
+        });
         return new Response('Unauthorized Drive Access', { status: response.status });
       }
     }

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { AuthProvider, useAuth } from './context/AuthContext';
-import { PlayerProvider, usePlayer } from './context/PlayerContext';
+import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './context/useAuth';
+import { PlayerProvider } from './context/PlayerContext';
+import { usePlayer } from './context/usePlayer';
 import { setAuthValue } from './utils/db';
 import { syncLibrary, shuffleLibrary, resolveM3UPlaylist } from './utils/library';
 import type { Track } from './types';
@@ -87,14 +89,13 @@ const MOCK_TRACKS: Track[] = [
 ];
 
 function AppContent() {
-  const { isAuthenticated, isLoading, login, logout, accessToken } = useAuth();
+  const { isAuthenticated, isLoading, login, logout, accessToken, authError } = useAuth();
   const {
     currentTrack,
     isPlaying,
     playbackProgress,
     duration,
     queue,
-    currentIndex,
     isRateLimited,
     backoffSeconds,
     isShuffleEnabled,
@@ -184,8 +185,13 @@ function AppContent() {
               <path fill="#FBBC05" d="M10.54 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24s.92 7.54 2.56 10.78l7.98-6.19z"/>
               <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.4-5.73c-2.11 1.4-4.81 2.3-8.49 2.3-6.26 0-11.57-4.22-13.46-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
             </svg>
-            Sign in with Google
+            {authError ? 'Sign in again' : 'Sign in with Google'}
           </button>
+          {authError && (
+            <div className="auth-error-message" role="alert">
+              {authError}
+            </div>
+          )}
         </div>
       ) : (
         <div className="player-layout">
@@ -198,6 +204,13 @@ function AppContent() {
                 <line x1="12" y1="17" x2="12.01" y2="17" />
               </svg>
               <span>Google API Rate Limit Hit. Backing off... Retry in <strong>{backoffSeconds}s</strong></span>
+            </div>
+          )}
+
+          {authError && (
+            <div className="auth-warning-banner" role="alert">
+              <span>{authError}</span>
+              <button onClick={login}>Reconnect</button>
             </div>
           )}
 
@@ -349,13 +362,13 @@ function AppContent() {
                   <div className="queue-overview">
                     <h4>Up Next</h4>
                     <div className="queue-mini-list">
-                      {queue.slice(currentIndex + 1, currentIndex + 4).map((t, i) => (
+                      {queue.slice(1, 4).map((t, i) => (
                         <div key={t.id} className="queue-mini-item">
                           <span className="num">{i + 1}</span>
                           <span className="title">{t.title}</span>
                         </div>
                       ))}
-                      {currentIndex === queue.length - 1 && (
+                      {queue.length <= 1 && (
                         <span className="empty-queue">Queue is empty. Shuffling soon.</span>
                       )}
                     </div>

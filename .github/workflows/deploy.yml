@@ -124,6 +124,7 @@ jobs:
         env:
           VITE_OAUTH_CLIENT_ID: ${{ secrets.VITE_OAUTH_CLIENT_ID }}
           VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://music-player-backend-140585753373.us-central1.run.app' }}
+          VITE_GCS_INDEX_URL: ${{ secrets.VITE_GCS_INDEX_URL || 'https://storage.googleapis.com/gdrive-music-player-bucket/index.json' }}
 
       - name: Deploy to Firebase Hosting
         if: steps.filter.outputs.client == 'true'

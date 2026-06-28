@@ -142,6 +142,18 @@ body {
   transform: scale(0.98);
 }
 
+.auth-error-message {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid rgba(234, 67, 53, 0.35);
+  border-radius: 10px;
+  background-color: rgba(234, 67, 53, 0.12);
+  color: #ffb4ab;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+}
+
 /* Player Dashboard Layout */
 .player-layout {
   display: flex;
@@ -166,6 +178,31 @@ body {
   justify-content: center;
   z-index: 1000;
   box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+}
+
+.auth-warning-banner {
+  background-color: rgba(251, 188, 5, 0.16);
+  color: #ffe08a;
+  border-bottom: 1px solid rgba(251, 188, 5, 0.35);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font-size: 13px;
+  font-weight: 500;
+  z-index: 1000;
+}
+
+.auth-warning-banner button {
+  background-color: transparent;
+  color: #fff3c4;
+  border: 1px solid rgba(251, 188, 5, 0.45);
+  border-radius: 999px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 /* Header */

@@ -1,26 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
+import { PlayerContext } from './PlayerContextCore';
 import type { Track } from '../types';
 
-interface PlayerContextType {
-  currentTrack: Track | null;
-  isPlaying: boolean;
-  playbackProgress: number;
-  duration: number;
-  queue: Track[];
-  currentIndex: number;
-  isRateLimited: boolean;
-  backoffSeconds: number;
-  isShuffleEnabled: boolean;
-  playTrack: (track: Track, newQueue?: Track[]) => void;
-  togglePlay: () => void;
-  playNext: () => void;
-  playPrev: () => void;
-  toggleShuffle: () => void;
-  seekTo: (percentage: number) => void;
-  addToQueue: (track: Track) => void;
-}
+const getTrackSource = (track: Track) => track.id.startsWith('http') ? track.id : `/drive-stream/${track.id}`;
 
-const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
+const resolveAudioSource = (src: string) => new URL(src, window.location.href).href;
 
 export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [queue, setQueue] = useState<Track[]>([]);
@@ -44,6 +28,29 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const currentTrack = currentIndex >= 0 && currentIndex < fullLibraryRef.current.length ? fullLibraryRef.current[currentIndex] : null;
 
+  // Handle HTTP 429 Rate Limit simulation with Exponential Backoff
+  const handleRateLimit = useCallback(() => {
+    setIsPlaying(false);
+    setIsRateLimited(true);
+    
+    // Exponential backoff calculation: 2^count * 5 seconds
+    const count = backoffCountRef.current;
+    const delay = Math.min(60, Math.pow(2, count) * 5);
+    setBackoffSeconds(delay);
+    backoffCountRef.current += 1;
+
+    const interval = setInterval(() => {
+      setBackoffSeconds((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          setIsRateLimited(false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
   // Initialize Audio Elements
   useEffect(() => {
     const audioA = new Audio();
@@ -59,6 +66,157 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       audioRefB.current = null;
     };
   }, []);
+
+  // Pre-buffer next track on Player B when Player A is active (Story 1.4 Gapless Preview)
+  useEffect(() => {
+    const currentQueue = fullLibraryRef.current.length > 0 ? fullLibraryRef.current : queue;
+    if (currentIndex >= 0 && currentIndex < currentQueue.length - 1) {
+      const nextTrack = currentQueue[currentIndex + 1];
+      const inactiveAudio = activePlayerRef.current === 'A' ? audioRefB.current : audioRefA.current;
+      if (inactiveAudio) {
+        // Prepare/preload the next track using Service Worker routing path
+        inactiveAudio.src = getTrackSource(nextTrack);
+        inactiveAudio.load();
+      }
+    }
+  }, [currentIndex, queue]);
+
+  const playTrack = useCallback((track: Track, newQueue?: Track[]) => {
+    let currentQueue = newQueue || fullLibraryRef.current;
+    if (newQueue) {
+      fullLibraryRef.current = newQueue;
+    }
+
+    let index = currentQueue.findIndex((t) => t.id === track.id);
+    if (index === -1) {
+      const updatedQueue = [...currentQueue, track];
+      fullLibraryRef.current = updatedQueue;
+      currentQueue = updatedQueue;
+      index = updatedQueue.length - 1;
+    } else {
+      fullLibraryRef.current = currentQueue;
+    }
+
+    setCurrentIndex(index);
+
+    setIsPlaying(true);
+    setPlaybackProgress(0);
+
+    // Keep the reactive queue state small and high-performance
+    const start = Math.max(0, index);
+    setQueue(currentQueue.slice(start, start + 50));
+
+    // Load active source
+    const activeAudio = activePlayerRef.current === 'A' ? audioRefA.current : audioRefB.current;
+    if (activeAudio) {
+      activeAudio.src = getTrackSource(track);
+      activeAudio.play()
+        .then(() => {
+          // Reset rate limiting counts on successful play
+          backoffCountRef.current = 0;
+          setIsRateLimited(false);
+        })
+        .catch((err) => {
+          console.warn('Audio play failed or was interrupted:', err);
+          setIsPlaying(false);
+        });
+    }
+  }, []);
+
+  const togglePlay = useCallback(() => {
+    const activeAudio = activePlayerRef.current === 'A' ? audioRefA.current : audioRefB.current;
+    if (!activeAudio || !currentTrack) return;
+
+    if (isPlaying) {
+      activeAudio.pause();
+      setIsPlaying(false);
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'paused';
+      }
+    } else {
+      activeAudio.play()
+        .then(() => {
+          setIsPlaying(true);
+          if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'playing';
+          }
+        })
+        .catch((err) => {
+          console.warn('Audio play toggle failed or was interrupted:', err);
+          setIsPlaying(false);
+        });
+    }
+  }, [currentTrack, isPlaying]);
+
+  const toggleShuffle = useCallback(() => {
+    setIsShuffleEnabled((prev) => !prev);
+  }, []);
+
+  const playNext = useCallback(() => {
+    const currentQueue = fullLibraryRef.current.length > 0 ? fullLibraryRef.current : queue;
+    if (currentQueue.length === 0) return;
+
+    let nextIndex = currentIndex + 1;
+    if (isShuffleEnabled) {
+      // Pick a completely random index from the entire library
+      nextIndex = Math.floor(Math.random() * currentQueue.length);
+    }
+
+    if (nextIndex >= 0 && nextIndex < currentQueue.length) {
+      // Swap active audio element A/B
+      const prevAudio = activePlayerRef.current === 'A' ? audioRefA.current : audioRefB.current;
+      const nextAudio = activePlayerRef.current === 'A' ? audioRefB.current : audioRefA.current;
+
+      if (prevAudio) {
+        prevAudio.pause();
+        prevAudio.currentTime = 0;
+      }
+
+      activePlayerRef.current = activePlayerRef.current === 'A' ? 'B' : 'A';
+      setCurrentIndex(nextIndex);
+      setIsPlaying(true);
+
+      const nextTrack = currentQueue[nextIndex];
+      const expectedSrc = resolveAudioSource(getTrackSource(nextTrack));
+      if (nextAudio && nextAudio.src === expectedSrc) {
+        nextAudio.play()
+          .then(() => {
+            backoffCountRef.current = 0;
+            setIsRateLimited(false);
+          })
+          .catch((err) => {
+            console.error('Gapless play failed, fallback standard loading:', err);
+            playTrack(nextTrack);
+          });
+      } else {
+        playTrack(nextTrack);
+      }
+    } else {
+      setIsPlaying(false);
+      setPlaybackProgress(100);
+    }
+  }, [currentIndex, isShuffleEnabled, playTrack, queue]);
+
+  const playPrev = useCallback(() => {
+    const currentQueue = fullLibraryRef.current.length > 0 ? fullLibraryRef.current : queue;
+    if (currentQueue.length === 0) return;
+
+    let prevIndex = currentIndex - 1;
+    if (isShuffleEnabled) {
+      prevIndex = Math.floor(Math.random() * currentQueue.length);
+    }
+
+    if (prevIndex >= 0 && prevIndex < currentQueue.length) {
+      const activeAudio = activePlayerRef.current === 'A' ? audioRefA.current : audioRefB.current;
+      if (activeAudio) {
+        activeAudio.pause();
+        activeAudio.currentTime = 0;
+      }
+      setCurrentIndex(prevIndex);
+      const prevTrack = currentQueue[prevIndex];
+      playTrack(prevTrack);
+    }
+  }, [currentIndex, isShuffleEnabled, playTrack, queue]);
 
   // Sync state transitions and progress
   useEffect(() => {
@@ -99,7 +257,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       activeAudio.removeEventListener('ended', handleEnded);
       activeAudio.removeEventListener('error', handleError);
     };
-  }, [currentIndex, queue]);
+  }, [currentIndex, handleRateLimit, playNext, queue]);
 
   // MediaSession metadata integration
   useEffect(() => {
@@ -118,176 +276,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       navigator.mediaSession.setActionHandler('nexttrack', () => playNext());
       navigator.mediaSession.setActionHandler('previoustrack', () => playPrev());
     }
-  }, [currentTrack]);
-
-  // Pre-buffer next track on Player B when Player A is active (Story 1.4 Gapless Preview)
-  useEffect(() => {
-    if (currentIndex >= 0 && currentIndex < queue.length - 1) {
-      const nextTrack = queue[currentIndex + 1];
-      const inactiveAudio = activePlayerRef.current === 'A' ? audioRefB.current : audioRefA.current;
-      if (inactiveAudio) {
-        // Prepare/preload the next track using Service Worker routing path
-        inactiveAudio.src = nextTrack.id.startsWith('http') ? nextTrack.id : `/drive-stream/${nextTrack.id}`;
-        inactiveAudio.load();
-      }
-    }
-  }, [currentIndex, queue]);
-
-  // Handle HTTP 429 Rate Limit simulation with Exponential Backoff
-  const handleRateLimit = () => {
-    setIsPlaying(false);
-    setIsRateLimited(true);
-    
-    // Exponential backoff calculation: 2^count * 5 seconds
-    const count = backoffCountRef.current;
-    const delay = Math.min(60, Math.pow(2, count) * 5);
-    setBackoffSeconds(delay);
-    backoffCountRef.current += 1;
-
-    const interval = setInterval(() => {
-      setBackoffSeconds((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          setIsRateLimited(false);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
-
-  const playTrack = (track: Track, newQueue?: Track[]) => {
-    const currentQueue = newQueue || fullLibraryRef.current;
-    if (newQueue) {
-      fullLibraryRef.current = newQueue;
-    }
-
-    const index = currentQueue.findIndex((t) => t.id === track.id);
-    if (index === -1) {
-      const updatedQueue = [...currentQueue, track];
-      fullLibraryRef.current = updatedQueue;
-      setCurrentIndex(updatedQueue.length - 1);
-    } else {
-      setCurrentIndex(index);
-    }
-
-    setIsPlaying(true);
-    setPlaybackProgress(0);
-
-    // Keep the reactive queue state small and high-performance
-    const start = Math.max(0, index);
-    setQueue(currentQueue.slice(start, start + 50));
-
-    // Load active source
-    const activeAudio = activePlayerRef.current === 'A' ? audioRefA.current : audioRefB.current;
-    if (activeAudio) {
-      activeAudio.src = track.id.startsWith('http') ? track.id : `/drive-stream/${track.id}`;
-      activeAudio.play()
-        .then(() => {
-          // Reset rate limiting counts on successful play
-          backoffCountRef.current = 0;
-          setIsRateLimited(false);
-        })
-        .catch((err) => {
-          console.warn('Audio play failed or was interrupted:', err);
-          setIsPlaying(false);
-        });
-    }
-  };
-
-  const togglePlay = () => {
-    const activeAudio = activePlayerRef.current === 'A' ? audioRefA.current : audioRefB.current;
-    if (!activeAudio || !currentTrack) return;
-
-    if (isPlaying) {
-      activeAudio.pause();
-      setIsPlaying(false);
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = 'paused';
-      }
-    } else {
-      activeAudio.play()
-        .then(() => {
-          setIsPlaying(true);
-          if ('mediaSession' in navigator) {
-            navigator.mediaSession.playbackState = 'playing';
-          }
-        })
-        .catch((err) => {
-          console.warn('Audio play toggle failed or was interrupted:', err);
-          setIsPlaying(false);
-        });
-    }
-  };
-
-  const toggleShuffle = () => {
-    setIsShuffleEnabled((prev) => !prev);
-  };
-
-  const playNext = () => {
-    const currentQueue = fullLibraryRef.current.length > 0 ? fullLibraryRef.current : queue;
-    if (currentQueue.length === 0) return;
-
-    let nextIndex = currentIndex + 1;
-    if (isShuffleEnabled) {
-      // Pick a completely random index from the entire library
-      nextIndex = Math.floor(Math.random() * currentQueue.length);
-    }
-
-    if (nextIndex >= 0 && nextIndex < currentQueue.length) {
-      // Swap active audio element A/B
-      const prevAudio = activePlayerRef.current === 'A' ? audioRefA.current : audioRefB.current;
-      const nextAudio = activePlayerRef.current === 'A' ? audioRefB.current : audioRefA.current;
-
-      if (prevAudio) {
-        prevAudio.pause();
-        prevAudio.currentTime = 0;
-      }
-
-      activePlayerRef.current = activePlayerRef.current === 'A' ? 'B' : 'A';
-      setCurrentIndex(nextIndex);
-      setIsPlaying(true);
-
-      const nextTrack = currentQueue[nextIndex];
-      if (nextAudio && nextAudio.src) {
-        nextAudio.play()
-          .then(() => {
-            backoffCountRef.current = 0;
-            setIsRateLimited(false);
-          })
-          .catch((err) => {
-            console.error('Gapless play failed, fallback standard loading:', err);
-            playTrack(nextTrack);
-          });
-      } else {
-        playTrack(nextTrack);
-      }
-    } else {
-      setIsPlaying(false);
-      setPlaybackProgress(100);
-    }
-  };
-
-  const playPrev = () => {
-    const currentQueue = fullLibraryRef.current.length > 0 ? fullLibraryRef.current : queue;
-    if (currentQueue.length === 0) return;
-
-    let prevIndex = currentIndex - 1;
-    if (isShuffleEnabled) {
-      prevIndex = Math.floor(Math.random() * currentQueue.length);
-    }
-
-    if (prevIndex >= 0 && prevIndex < currentQueue.length) {
-      const activeAudio = activePlayerRef.current === 'A' ? audioRefA.current : audioRefB.current;
-      if (activeAudio) {
-        activeAudio.pause();
-        activeAudio.currentTime = 0;
-      }
-      setCurrentIndex(prevIndex);
-      const prevTrack = currentQueue[prevIndex];
-      playTrack(prevTrack);
-    }
-  };
+  }, [currentTrack, playNext, playPrev, togglePlay]);
 
   // Sync lightweight sliding queue window when index changes
   useEffect(() => {
@@ -297,21 +286,22 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setQueue(lib.slice(start, start + 50));
   }, [currentIndex]);
 
-  const seekTo = (percentage: number) => {
+  const seekTo = useCallback((percentage: number) => {
     const activeAudio = activePlayerRef.current === 'A' ? audioRefA.current : audioRefB.current;
     if (!activeAudio || !activeAudio.duration) return;
 
     const targetTime = (percentage / 100) * activeAudio.duration;
     activeAudio.currentTime = targetTime;
     setPlaybackProgress(percentage);
-  };
+  }, []);
 
-  const addToQueue = (track: Track) => {
+  const addToQueue = useCallback((track: Track) => {
+    fullLibraryRef.current = [...fullLibraryRef.current, track];
     setQueue((prev) => [...prev, track]);
     if (currentIndex === -1) {
       setCurrentIndex(0);
     }
-  };
+  }, [currentIndex]);
 
   // Listen to secure postMessages from the Service Worker (e.g. for real 429 events)
   useEffect(() => {
@@ -330,7 +320,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         navigator.serviceWorker.removeEventListener('message', handleSWMessage);
       }
     };
-  }, []);
+  }, [handleRateLimit]);
 
   return (
     <PlayerContext.Provider
@@ -356,12 +346,4 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       {children}
     </PlayerContext.Provider>
   );
-};
-
-export const usePlayer = () => {
-  const context = useContext(PlayerContext);
-  if (context === undefined) {
-    throw new Error('usePlayer must be used within a PlayerProvider');
-  }
-  return context;
 };

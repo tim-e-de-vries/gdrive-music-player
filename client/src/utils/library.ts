@@ -1,6 +1,10 @@
 import type { Track } from '../types';
 import { getMetaValue, setMetaValue, clearTracksStore, bulkSaveTracks, getAllTracks } from './db';
 
+if (import.meta.env.PROD && !import.meta.env.VITE_GCS_INDEX_URL) {
+  throw new Error('VITE_GCS_INDEX_URL must be configured for production builds.');
+}
+
 const GCS_INDEX_URL = import.meta.env.VITE_GCS_INDEX_URL || 'https://storage.googleapis.com/gdrive-music-player-bucket/index.json';
 
 /**
