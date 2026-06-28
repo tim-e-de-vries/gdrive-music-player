@@ -40,9 +40,10 @@ app.get('/health', (req, res) => {
 // Redirect users to Google for authentication
 app.get('/api/auth/google', (req, res) => {
   const client = getOAuth2Client();
+  const forceConsent = req.query.prompt === 'consent';
   const url = client.generateAuthUrl({
     access_type: 'offline',
-    prompt: 'consent', // Ensures we always receive a Refresh Token
+    prompt: forceConsent ? 'consent' : 'select_account',
     scope: ['https://www.googleapis.com/auth/drive.readonly'],
   });
   res.redirect(url);
