@@ -1,7 +1,7 @@
 {
   "projects": {
-    "default": "gdrive-music-player-da3ea",
-    "staging": "gdrive-music-player-da3ea"
+    "default": "gdrive-music-player-500123",
+    "staging": "gdrive-music-player-500123"
   },
   "targets": {},
   "etags": {}
