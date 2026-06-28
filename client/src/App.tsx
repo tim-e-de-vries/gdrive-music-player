@@ -1,3 +1,4 @@
+// Deploy version timestamp: 2026-06-28
 import { useEffect, useState } from 'react';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/useAuth';
