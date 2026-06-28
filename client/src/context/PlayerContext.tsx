@@ -25,6 +25,7 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const audioRefA = useRef<HTMLAudioElement | null>(null);
   const audioRefB = useRef<HTMLAudioElement | null>(null);
   const activePlayerRef = useRef<'A' | 'B'>('A');
+  const nextShuffleIndexRef = useRef<number | null>(null);
 
   const currentTrack = currentIndex >= 0 && currentIndex < fullLibraryRef.current.length ? fullLibraryRef.current[currentIndex] : null;
 
@@ -70,18 +71,33 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Pre-buffer next track on Player B when Player A is active (Story 1.4 Gapless Preview)
   useEffect(() => {
     const currentQueue = fullLibraryRef.current.length > 0 ? fullLibraryRef.current : queue;
-    if (currentIndex >= 0 && currentIndex < currentQueue.length - 1) {
-      const nextTrack = currentQueue[currentIndex + 1];
-      const inactiveAudio = activePlayerRef.current === 'A' ? audioRefB.current : audioRefA.current;
-      if (inactiveAudio) {
-        // Prepare/preload the next track using Service Worker routing path
-        inactiveAudio.src = getTrackSource(nextTrack);
-        inactiveAudio.load();
+    if (currentIndex >= 0 && currentQueue.length > 0) {
+      let nextTrackIndex = currentIndex + 1;
+      if (isShuffleEnabled) {
+        if (nextShuffleIndexRef.current !== null) {
+          nextTrackIndex = nextShuffleIndexRef.current;
+        } else {
+          nextTrackIndex = Math.floor(Math.random() * currentQueue.length);
+          nextShuffleIndexRef.current = nextTrackIndex;
+        }
+      } else {
+        nextShuffleIndexRef.current = null;
+      }
+
+      if (nextTrackIndex >= 0 && nextTrackIndex < currentQueue.length) {
+        const nextTrack = currentQueue[nextTrackIndex];
+        const inactiveAudio = activePlayerRef.current === 'A' ? audioRefB.current : audioRefA.current;
+        if (inactiveAudio) {
+          // Prepare/preload the next track using Service Worker routing path
+          inactiveAudio.src = getTrackSource(nextTrack);
+          inactiveAudio.load();
+        }
       }
     }
-  }, [currentIndex, queue]);
+  }, [currentIndex, queue, isShuffleEnabled]);
 
   const playTrack = useCallback((track: Track, newQueue?: Track[]) => {
+    nextShuffleIndexRef.current = null;
     let currentQueue = newQueue || fullLibraryRef.current;
     if (newQueue) {
       fullLibraryRef.current = newQueue;
@@ -158,9 +174,15 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     let nextIndex = currentIndex + 1;
     if (isShuffleEnabled) {
-      // Pick a completely random index from the entire library
-      nextIndex = Math.floor(Math.random() * currentQueue.length);
+      if (nextShuffleIndexRef.current !== null) {
+        nextIndex = nextShuffleIndexRef.current;
+      } else {
+        nextIndex = Math.floor(Math.random() * currentQueue.length);
+      }
     }
+
+    // Reset next shuffle index so a new random track can be chosen for the next track
+    nextShuffleIndexRef.current = null;
 
     if (nextIndex >= 0 && nextIndex < currentQueue.length) {
       // Swap active audio element A/B
@@ -200,6 +222,9 @@ export const PlayerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const playPrev = useCallback(() => {
     const currentQueue = fullLibraryRef.current.length > 0 ? fullLibraryRef.current : queue;
     if (currentQueue.length === 0) return;
+
+    // Reset next shuffle index on manual navigation
+    nextShuffleIndexRef.current = null;
 
     let prevIndex = currentIndex - 1;
     if (isShuffleEnabled) {
