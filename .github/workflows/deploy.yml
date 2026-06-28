@@ -128,11 +128,25 @@ jobs:
           VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://music-player-backend-140585753373.us-central1.run.app' }}
           VITE_GCS_INDEX_URL: ${{ secrets.VITE_GCS_INDEX_URL || 'https://storage.googleapis.com/gdrive-music-player-bucket/index.json' }}
 
+      - name: Authenticate to Firebase
+        if: steps.filter.outputs.client == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_GDRIVE_MUSIC_PLAYER_DA3EA }}
+
       - name: Deploy to Firebase Hosting
         if: steps.filter.outputs.client == 'true'
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_GDRIVE_MUSIC_PLAYER_DA3EA }}
-          projectId: ${{ env.FIREBASE_PROJECT_ID }}
-          channelId: live
+        run: |
+          set +e
+          npx firebase-tools@15.22.3 deploy --only hosting --project "${FIREBASE_PROJECT_ID}" --non-interactive 2>&1 | tee firebase-deploy.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            if grep -q "is the current active version" firebase-deploy.log; then
+              echo "Firebase Hosting already made this version active; treating retry response as success."
+              exit 0
+            fi
+
+            exit "$status"
+          fi
