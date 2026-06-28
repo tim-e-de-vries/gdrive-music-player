@@ -13,6 +13,7 @@ on:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID || 'gdrive-music-player-da3ea' }}
   REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
   REPOSITORY: ${{ secrets.GCP_AR_REPOSITORY || 'cloud-music-player' }}
   SERVICE: ${{ secrets.GCP_SERVICE_NAME || 'music-player-backend' }}
@@ -106,7 +107,7 @@ jobs:
         if: steps.filter.outputs.client == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'npm'
           cache-dependency-path: './client/package-lock.json'
 
@@ -132,5 +133,5 @@ jobs:
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_GDRIVE_MUSIC_PLAYER_DA3EA }}
-          projectId: ${{ env.PROJECT_ID }}
+          projectId: ${{ env.FIREBASE_PROJECT_ID }}
           channelId: live
